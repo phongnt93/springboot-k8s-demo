@@ -7,10 +7,6 @@ pipeline {
         DOCKER_IMAGE_NAME     = 'nguyenphong8852/springboot-k8s-demo'
         DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'   // Credentials trong Jenkins
 
-        // GitOps manifest repo (cho ArgoCD)
-        MANIFEST_REPO_URL = 'https://github.com/phongnt93/k8s-manifests.git'
-        GITHUB_TOKEN      = credentials('github-token')    // PAT có quyền push
-
         // Thông tin build
         GIT_COMMIT_SHORT = ''
         IMAGE_TAG        = ''
@@ -28,16 +24,16 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    // Tag dạng: branch-commit-buildNumber (vd: dev-a1b2c3-10)
+                    // Tag: branch-commit-buildNumber (vd: main-a1b2c3-10)
                     IMAGE_TAG = "${env.BRANCH_NAME}-${GIT_COMMIT_SHORT}-${env.BUILD_NUMBER}"
 
-                    // Map branch -> env
+                    // Map branch -> env (sẵn nếu sau này dùng staging/production)
                     DEPLOY_ENV = (env.BRANCH_NAME == 'main'    ? 'production' :
                                   env.BRANCH_NAME == 'staging' ? 'staging'   : 'dev')
 
                     echo "Commit: ${GIT_COMMIT_SHORT}"
                     echo "Image tag: ${IMAGE_TAG}"
-                    echo "Deploy env: ${DEPLOY_ENV}"
+                    echo "Deploy env (for ArgoCD): ${DEPLOY_ENV}"
                 }
             }
         }
@@ -78,46 +74,33 @@ pipeline {
             steps {
                 script {
                     sh """
-                      rm -rf k8s-manifests
-                      git clone https://${GITHUB_TOKEN}@github.com/phongnt93/k8s-manifests.git
-                      cd k8s-manifests
+                      # Đang ở trong repo springboot-k8s-demo
 
                       git config user.name  "Jenkins CI"
                       git config user.email "jenkins@ci.local"
 
-                      # Cập nhật image trong deployment của môi trường tương ứng
-                      # Ví dụ file: dev/deployment.yaml, staging/deployment.yaml, production/deployment.yaml
-                      sed -i 's|image: .*|image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}|g' ${DEPLOY_ENV}/deployment.yaml
+                      # Cập nhật image trong k8s-manifests/deployment.yaml
+                      sed -i 's|image: .*|image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}|g' k8s-manifests/deployment.yaml
 
-                      git add ${DEPLOY_ENV}/deployment.yaml
-                      git commit -m "Update ${DEPLOY_ENV} image to ${IMAGE_TAG} (build ${env.BUILD_NUMBER})" || echo "No changes to commit"
-                      git push origin main || echo "Nothing to push"
-
-                      cd ..
-                      rm -rf k8s-manifests
+                      git add k8s-manifests/deployment.yaml
+                      git commit -m "Update image to ${IMAGE_TAG} (build ${env.BUILD_NUMBER})" || echo "No changes to commit"
+                      git push origin ${env.BRANCH_NAME} || echo "Nothing to push"
                     """
                 }
             }
         }
 
         stage('Notify ArgoCD') {
-            when {
-                anyOf {
-                    branch 'main'
-                    branch 'staging'
-                    branch 'dev'
-                }
-            }
             steps {
-                echo "ArgoCD sẽ tự động sync app trỏ tới path ${DEPLOY_ENV}/ trong repo phongnt93/k8s-manifests."
-                echo "Nếu cần sync tay: argocd app sync springboot-${DEPLOY_ENV}"
+                echo "ArgoCD Application (repo: springboot-k8s-demo, path: k8s-manifests, ns: springboot-demo)"
+                echo "sẽ tự Sync và rollout deployment với image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}."
             }
         }
     }
 
     post {
         success {
-            echo "✅ CI hoàn tất: build + test + push image + update manifests. CD do ArgoCD thực hiện vào namespace springboot-demo."
+            echo "✅ CI OK: build + test + push image + update manifests. CD do ArgoCD thực hiện."
         }
         always {
             sh 'docker system prune -f || true'
@@ -125,4 +108,3 @@ pipeline {
         }
     }
 }
-
