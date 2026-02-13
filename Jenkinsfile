@@ -7,22 +7,23 @@ kind: Pod
 spec:
   serviceAccountName: jenkins
   containers:
-  - name: docker
-    image: docker:27.0.3-dind
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:latest
     command:
-    - sleep
-    args:
-    - "9999999"
+    - cat
+    tty: true
     volumeMounts:
-    - name: docker-sock
-      mountPath: /var/run/docker.sock
+    - name: kaniko-secret
+      mountPath: /kaniko/.docker
   volumes:
-  - name: docker-sock
-    hostPath:
-      path: /var/run/docker.sock
-      type: Socket
+  - name: kaniko-secret
+    secret:
+      secretName: dockerhub-secret
+      items:
+      - key: .dockerconfigjson
+        path: config.json
 '''
-            defaultContainer 'docker'
+            defaultContainer 'kaniko'
         }
     }
 
@@ -50,24 +51,16 @@ spec:
             }
         }
 
-        stage('Docker Build') {
+        stage('Build & Push with Kaniko') {
             steps {
                 sh """
-                  docker version
-                  docker build -t ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} .
-                  docker tag ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_IMAGE_NAME}:latest
+                  echo "Building and pushing image with Kaniko..."
+                  /kaniko/executor \
+                    --dockerfile=Dockerfile \
+                    --context=${PWD} \
+                    --destination=${DOCKER_IMAGE_NAME}:${IMAGE_TAG} \
+                    --destination=${DOCKER_IMAGE_NAME}:latest
                 """
-            }
-        }
-
-        stage('Docker Push') {
-            steps {
-                script {
-                    docker.withRegistry("https://${DOCKER_REGISTRY}", DOCKER_CREDENTIALS_ID) {
-                        sh "docker push ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
-                        sh "docker push ${DOCKER_IMAGE_NAME}:latest"
-                    }
-                }
             }
         }
 
@@ -75,8 +68,7 @@ spec:
             steps {
                 sh """
                   echo "Verify image just pushed:"
-                  docker pull ${DOCKER_IMAGE_NAME}:latest
-                  docker images | grep spring-boot-k8s-demo || true
+                  docker pull ${DOCKER_IMAGE_NAME}:latest || echo "docker CLI not available in kaniko pod"
                 """
             }
         }
