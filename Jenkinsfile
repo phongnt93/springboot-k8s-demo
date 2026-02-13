@@ -1,5 +1,30 @@
 pipeline {
-    agent any
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins
+  containers:
+  - name: docker
+    image: docker:27.0.3-dind
+    command:
+    - sleep
+    args:
+    - "9999999"
+    volumeMounts:
+    - name: docker-sock
+      mountPath: /var/run/docker.sock
+  volumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+      type: Socket
+'''
+            defaultContainer 'docker'
+        }
+    }
 
     environment {
         DOCKER_REGISTRY       = 'docker.io'
@@ -27,12 +52,11 @@ pipeline {
 
         stage('Docker Build') {
             steps {
-                script {
-                    sh """
-                      docker build -t ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} .
-                      docker tag ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_IMAGE_NAME}:latest
-                    """
-                }
+                sh """
+                  docker version
+                  docker build -t ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} .
+                  docker tag ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_IMAGE_NAME}:latest
+                """
             }
         }
 
@@ -49,13 +73,11 @@ pipeline {
 
         stage('Verify image') {
             steps {
-                script {
-                    sh """
-                      echo "Verify image just pushed:"
-                      docker pull ${DOCKER_IMAGE_NAME}:latest
-                      docker images | grep spring-boot-k8s-demo || true
-                    """
-                }
+                sh """
+                  echo "Verify image just pushed:"
+                  docker pull ${DOCKER_IMAGE_NAME}:latest
+                  docker images | grep spring-boot-k8s-demo || true
+                """
             }
         }
     }
