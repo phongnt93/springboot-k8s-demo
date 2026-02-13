@@ -17,7 +17,7 @@ spec:
         - name: dockerhub-secret
       containers:
         - name: springboot-k8s-demo
-          image: nguyenphong8852/springboot-k8s-demo:latest
+          image: nguyenphong8852/spring-boot-k8s-demo:latest
           ports:
             - containerPort: 8080
 ---
