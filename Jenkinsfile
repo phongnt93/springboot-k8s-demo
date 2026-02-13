@@ -1,7 +1,6 @@
-pipeline {
-    agent {
-        kubernetes {
-            yaml '''
+agent {
+    kubernetes {
+        yaml '''
 apiVersion: v1
 kind: Pod
 spec:
@@ -9,6 +8,11 @@ spec:
   containers:
   - name: kaniko
     image: gcr.io/kaniko-project/executor:latest
+    command:
+    - /busybox/sh
+    args:
+    - -c
+    - while true; do sleep 3600; done
     volumeMounts:
     - name: kaniko-secret
       mountPath: /kaniko/.docker
@@ -20,9 +24,10 @@ spec:
       - key: .dockerconfigjson
         path: config.json
 '''
-            defaultContainer 'kaniko'
-        }
+        defaultContainer 'kaniko'
     }
+}
+
 
     environment {
         DOCKER_REGISTRY       = 'docker.io'
