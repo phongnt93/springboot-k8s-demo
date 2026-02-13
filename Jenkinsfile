@@ -1,6 +1,7 @@
-agent {
-    kubernetes {
-        yaml '''
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
 apiVersion: v1
 kind: Pod
 spec:
@@ -24,10 +25,9 @@ spec:
       - key: .dockerconfigjson
         path: config.json
 '''
-        defaultContainer 'kaniko'
+            defaultContainer 'kaniko'
+        }
     }
-}
-
 
     environment {
         DOCKER_REGISTRY       = 'docker.io'
@@ -62,15 +62,6 @@ spec:
                     --context=${PWD} \
                     --destination=${DOCKER_IMAGE_NAME}:${IMAGE_TAG} \
                     --destination=${DOCKER_IMAGE_NAME}:latest
-                """
-            }
-        }
-
-        stage('Verify image') {
-            steps {
-                sh """
-                  echo "Verify image just pushed:"
-                  docker pull ${DOCKER_IMAGE_NAME}:latest || echo "docker CLI not available in kaniko pod"
                 """
             }
         }
