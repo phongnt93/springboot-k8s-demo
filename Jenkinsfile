@@ -2,85 +2,61 @@ pipeline {
     agent {
         kubernetes {
             yaml '''
-apiVersion: v1
-kind: Pod
-spec:
-  serviceAccountName: jenkins
-  containers:
-  - name: jnlp
-    image: jenkins/inbound-agent:latest
-  - name: kaniko
-    image: gcr.io/kaniko-project/executor:debug
-    command:
-    - /busybox/cat
-    tty: true
-    env:
-    - name: DOCKER_CONFIG
-      value: /kaniko/.docker/config.json
-    volumeMounts:
-    - name: docker-secret
-      mountPath: /kaniko/.docker
-  volumes:
-  - name: docker-secret
-    secret:
-      secretName: dockerhub-secret
-'''
-            defaultContainer 'jnlp'
+              apiVersion: v1
+              kind: Pod
+              spec:
+                serviceAccountName: jenkins
+                containers:
+                - name: docker
+                  image: docker:27.0.3-dind
+                  command:
+                  - sleep
+                  args:
+                  - 9999999
+                  volumeMounts:
+                  - name: docker-sock
+                    mountPath: /var/run/docker.sock
+                volumes:
+                - name: docker-sock
+                  hostPath:
+                    path: /var/run/docker.sock
+                    type: Socket
+            '''
         }
     }
 
     environment {
         DOCKER_IMAGE_NAME = 'nguyenphong8852/spring-boot-k8s-demo'
-        // Tag theo build number; đủ dùng cho ArgoCD rollback/debug
-        IMAGE_TAG         = "${env.BUILD_NUMBER}"
+        DOCKER_TAG = "${BUILD_NUMBER}"
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-                script {
-                    echo "Branch: ${env.BRANCH_NAME}"
-                    echo "Build image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                container('docker') {
+                    sh 'docker version'
+                    sh 'docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .'
+                    sh 'docker tag ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} ${DOCKER_IMAGE_NAME}:latest'
                 }
             }
         }
 
-        stage('Verify Kaniko Env') {
+        stage('Push to Docker Hub') {
             steps {
-                container('kaniko') {
-                    sh '''
-                      echo "=== Docker config in /kaniko/.docker ==="
-                      ls -la /kaniko/.docker || true
-                      head -c 120 /kaniko/.docker/config.json || true
-
-                      echo "=== Workspace ==="
-                      pwd
-                      ls -la
-
-                      echo "=== Check Dockerfile ==="
-                      if [ -f Dockerfile ]; then
-                        echo "FOUND Dockerfile"
-                      else
-                        echo "MISSING Dockerfile" && exit 1
-                      fi
-                    '''
-                }
-            }
-        }
-
-        stage('Build & Push with Kaniko') {
-            steps {
-                container('kaniko') {
-                    sh """
-                      echo "=== Building & pushing image ==="
-                      /kaniko/executor \\
-                        --dockerfile=${PWD}/Dockerfile \\
-                        --context=dir://${PWD} \\
-                        --destination=${DOCKER_IMAGE_NAME}:${IMAGE_TAG} \\
-                        --destination=${DOCKER_IMAGE_NAME}:latest \\
-                        --verbosity=info
-                    """
+                container('docker') {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                          echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                          docker push ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
+                          docker push ${DOCKER_IMAGE_NAME}:latest
+                        '''
+                    }
                 }
             }
         }
@@ -88,10 +64,10 @@ spec:
 
     post {
         success {
-            echo "✅ Build OK: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} (and :latest)"
+            echo "✅ Build succeeded! Image: ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
         }
         failure {
-            echo "❌ Build FAILED – xem log stage Kaniko."
+            echo "❌ Build failed!"
         }
     }
 }
