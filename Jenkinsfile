@@ -1,9 +1,31 @@
 pipeline {
-    agent any   // chạy ngay trên jenkins-0 (không spawn pod mới)
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins
+  containers:
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:debug
+    command: ["/busybox/cat"]
+    tty: true
+    volumeMounts:
+    - name: docker-secret
+      mountPath: /kaniko/.docker
+  volumes:
+  - name: docker-secret
+    secret:
+      secretName: dockerhub-secret
+'''
+            defaultContainer 'kaniko'
+        }
+    }
 
     environment {
         DOCKER_IMAGE_NAME = 'nguyenphong8852/spring-boot-k8s-demo'
-        DOCKER_TAG        = "${BUILD_NUMBER}"
+        IMAGE_TAG         = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -11,50 +33,40 @@ pipeline {
             steps {
                 checkout scm
                 script {
-                    echo "Building image: ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
+                    echo "Building image ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build & Push with Kaniko') {
             steps {
                 sh '''
-                  echo "=== Docker version ==="
-                  docker version
+                  echo "=== Workspace ==="
+                  pwd
+                  ls -la
 
-                  echo "=== Build image ==="
-                  docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .
-                  docker tag ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} ${DOCKER_IMAGE_NAME}:latest
+                  echo "=== Docker config ==="
+                  ls -la /kaniko/.docker
+                  head -c 120 /kaniko/.docker/config.json || true
+
+                  echo "=== Build & Push ==="
+                  /kaniko/executor \
+                    --dockerfile=${PWD}/Dockerfile \
+                    --context=dir://${PWD} \
+                    --destination=${DOCKER_IMAGE_NAME}:${IMAGE_TAG} \
+                    --destination=${DOCKER_IMAGE_NAME}:latest \
+                    --verbosity=info
                 '''
-            }
-        }
-
-        stage('Push to Docker Hub') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-credentials',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh '''
-                      echo "=== Login Docker Hub ==="
-                      echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-
-                      echo "=== Push images ==="
-                      docker push ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
-                      docker push ${DOCKER_IMAGE_NAME}:latest
-                    '''
-                }
             }
         }
     }
 
     post {
         success {
-            echo "✅ Pushed: ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} and :latest"
+            echo "✅ Pushed: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} and :latest"
         }
         failure {
-            echo "❌ Build failed – xem log build/push ở trên"
+            echo "❌ Build failed – xem log Kaniko ở trên"
         }
     }
 }
