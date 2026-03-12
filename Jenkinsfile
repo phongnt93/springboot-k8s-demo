@@ -7,63 +7,67 @@ kind: Pod
 spec:
   serviceAccountName: jenkins
   containers:
-  - name: jnlp
-    image: jenkins/inbound-agent:latest
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-  - name: docker
-    image: docker:27.0.3-dind
-    command: ["sleep"]
-    args: ["99999"]
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:debug
+    command:
+    - /busybox/cat
+    tty: true
     volumeMounts:
-    - name: docker-sock
-      mountPath: /var/run/docker.sock
+    - name: docker-secret
+      mountPath: /kaniko/.docker
   volumes:
-  - name: docker-sock
-    hostPath:
-      path: /var/run/docker.sock
+  - name: docker-secret
+    secret:
+      secretName: dockerhub-secret
 '''
-            defaultContainer 'docker'
+            defaultContainer 'kaniko'
         }
     }
 
     environment {
         DOCKER_IMAGE_NAME = 'nguyenphong8852/spring-boot-k8s-demo'
-        DOCKER_TAG = "${BUILD_NUMBER}"
+        IMAGE_TAG         = "${BUILD_NUMBER}"
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
+                script {
+                    echo "Building image ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
+                }
             }
         }
 
-        stage('Build & Push') {
+        stage('Build & Push with Kaniko') {
             steps {
-                container('docker') {
-                    sh 'docker version'
-                    sh 'docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .'
-                    sh 'docker tag ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} ${DOCKER_IMAGE_NAME}:latest'
+                sh '''
+                  echo "=== Workspace ==="
+                  pwd
+                  ls -la
 
-                    withCredentials([usernamePassword(
-                        credentialsId: 'dockerhub-credentials',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )]) {
-                        sh '''
-                          echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                          docker push ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
-                          docker push ${DOCKER_IMAGE_NAME}:latest
-                        '''
-                    }
-                }
+                  echo "=== Docker config ==="
+                  ls -la /kaniko/.docker
+                  head -c 120 /kaniko/.docker/config.json || true
+
+                  echo "=== Build & Push ==="
+                  /kaniko/executor \
+                    --dockerfile=${PWD}/Dockerfile \
+                    --context=dir://${PWD} \
+                    --destination=${DOCKER_IMAGE_NAME}:${IMAGE_TAG} \
+                    --destination=${DOCKER_IMAGE_NAME}:latest \
+                    --verbosity=info
+                '''
             }
         }
     }
 
     post {
         success {
-            echo "✅ Images: ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} and :latest"
+            echo "✅ Pushed: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} and :latest"
+        }
+        failure {
+            echo "❌ Build failed – xem log Kaniko ở trên"
         }
     }
 }
