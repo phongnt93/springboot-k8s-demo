@@ -10,26 +10,10 @@ spec:
   - name: jnlp
     image: jenkins/inbound-agent:latest
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-    resources:
-      requests:
-        memory: "256Mi"
-        cpu: "100m"
-      limits:
-        memory: "512Mi"
-        cpu: "500m"
   - name: docker
     image: docker:27.0.3-dind
-    command:
-    - sleep
-    args:
-    - "99999"
-    resources:
-      requests:
-        memory: "512Mi"
-        cpu: "200m"
-      limits:
-        memory: "1Gi"
-        cpu: "1000m"
+    command: ["sleep"]
+    args: ["99999"]
     volumeMounts:
     - name: docker-sock
       mountPath: /var/run/docker.sock
@@ -37,7 +21,6 @@ spec:
   - name: docker-sock
     hostPath:
       path: /var/run/docker.sock
-      type: Socket
 '''
             defaultContainer 'docker'
         }
@@ -52,27 +35,16 @@ spec:
         stage('Checkout') {
             steps {
                 checkout scm
-                script {
-                    echo "Building: ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
-                }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build & Push') {
             steps {
                 container('docker') {
-                    sh '''
-                      docker version
-                      docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .
-                      docker tag ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} ${DOCKER_IMAGE_NAME}:latest
-                    '''
-                }
-            }
-        }
+                    sh 'docker version'
+                    sh 'docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .'
+                    sh 'docker tag ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} ${DOCKER_IMAGE_NAME}:latest'
 
-        stage('Push to Docker Hub') {
-            steps {
-                container('docker') {
                     withCredentials([usernamePassword(
                         credentialsId: 'dockerhub-credentials',
                         usernameVariable: 'DOCKER_USER',
@@ -91,10 +63,7 @@ spec:
 
     post {
         success {
-            echo "✅ Images pushed: ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} and :latest"
-        }
-        failure {
-            echo "❌ Build failed - check logs"
+            echo "✅ Images: ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} and :latest"
         }
     }
 }
