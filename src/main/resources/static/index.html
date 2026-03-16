@@ -227,10 +227,8 @@
                 document.getElementById('message').textContent   = home.message   || '-';
                 document.getElementById('hostname').textContent  = home.hostname  || '-';
                 document.getElementById('timestamp').textContent = home.timestamp || '-';
-                document.getElementById('version').textContent   = home.version   || '-';
-                document.getElementById('java').textContent      = info.java      || '-';
-                document.getElementById('health').textContent    = health.status  || '-';
-                document.getElementById('statusBadge').textContent = health.status || 'Unknown';
+            document.getElementById('version').textContent  = info.version      || '-';                document.getElementById('java').textContent      = info.java      || '-';
+            document.getElementById('java').textContent      = info.system.javaVersion  || '-';                document.getElementById('statusBadge').textContent = health.status || 'Unknown';
             } catch(e) {
                 document.getElementById('message').textContent = 'Error loading data';
             }
