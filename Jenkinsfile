@@ -4,6 +4,8 @@ pipeline {
     environment {
         DOCKER_IMAGE_NAME = 'nguyenphong8852/spring-boot-k8s-demo'
         IMAGE_TAG         = "${BUILD_NUMBER}"
+        GIT_REPO          = 'https://github.com/phongnt93/springboot-k8s-demo.git'
+        MANIFEST_FILE     = 'k8s-manifests/deployment.yaml'
     }
 
     stages {
@@ -44,11 +46,40 @@ pipeline {
                 }
             }
         }
+
+        stage('Update K8s Manifest') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-credentials',
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_PASS'
+                )]) {
+                    sh '''
+                      echo "=== Update image tag in deployment.yaml ==="
+
+                      # Config git
+                      git config user.email "jenkins@local"
+                      git config user.name "Jenkins"
+
+                      # Update image tag: thay :latest hoặc :<number> bằng tag mới
+                      sed -i "s|image: ${DOCKER_IMAGE_NAME}:.*|image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}|g" ${MANIFEST_FILE}
+
+                      echo "=== Content after update ==="
+                      grep "image:" ${MANIFEST_FILE}
+
+                      # Commit và push
+                      git add ${MANIFEST_FILE}
+                      git commit -m "[Jenkins] Update image tag to ${IMAGE_TAG}"
+                      git push https://${GIT_USER}:${GIT_PASS}@github.com/phongnt93/springboot-k8s-demo.git HEAD:main
+                    '''
+                }
+            }
+        }
     }
 
     post {
         success {
-            echo "Pushed: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} and :latest"
+            echo "CI/CD done: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} pushed and manifest updated"
         }
         failure {
             echo "Build failed"
