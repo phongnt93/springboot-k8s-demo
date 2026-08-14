@@ -1,7 +1,10 @@
 @Library('jenkins-shared-library') _   // khai báo shared library
 
 pipeline {
-    agent any
+    // Dùng agent Kubernetes có container 'kaniko'
+    agent {
+        label 'jenkins-jenkins-agent'   // hoặc label mà pod template Kaniko của bạn đang dùng
+    }
 
     environment {
         DOCKER_IMAGE_NAME = 'nguyenphong8852/spring-boot-k8s-demo'
@@ -14,20 +17,30 @@ pipeline {
             steps {
                 checkout scm
                 script {
-                    echo "Building image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "Building image (Kaniko): ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build & Push Image (Kaniko)') {
             steps {
-                buildDockerImage(DOCKER_IMAGE_NAME, IMAGE_TAG)
+                // Chạy lệnh Kaniko trong container 'kaniko'
+                container('kaniko') {
+                    sh """
+                        /kaniko/executor \
+                          --dockerfile=${WORKSPACE}/Dockerfile \
+                          --context=${WORKSPACE} \
+                          --destination=${DOCKER_IMAGE_NAME}:${IMAGE_TAG} \
+                          --cleanup
+                    """
+                }
             }
         }
 
+        // Stage này chỉ để log, vì Kaniko đã push luôn image ở stage trên
         stage('Push to Docker Hub') {
             steps {
-                pushToDockerHub(DOCKER_IMAGE_NAME, IMAGE_TAG, 'dockerhub-credentials')
+                echo "Image đã được Kaniko build & push: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
             }
         }
 
@@ -46,7 +59,7 @@ pipeline {
 
     post {
         success {
-            echo "CI/CD done: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} pushed and manifest updated"
+            echo "CI/CD done (Kaniko): ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} pushed and manifest updated"
         }
         failure {
             echo "Build failed"
