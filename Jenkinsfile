@@ -1,9 +1,41 @@
-@Library('jenkins-shared-library') _   // khai báo shared library
+@Library('jenkins-shared-library') _
 
 pipeline {
-    // Dùng agent Kubernetes có container 'kaniko'
     agent {
-        label 'jenkins-jenkins-agent'   // hoặc label mà pod template Kaniko của bạn đang dùng
+        kubernetes {
+            label 'kaniko-agent'
+            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins/label: kaniko-agent
+spec:
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:3383.vc8881d4b_0e76-1
+    env:
+    - name: JENKINS_AGENT_WORKDIR
+      value: /home/jenkins/agent
+    volumeMounts:
+    - name: workspace-volume
+      mountPath: /home/jenkins/agent
+
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:debug
+    command:
+    - "/busybox/cat"
+    tty: true
+    volumeMounts:
+    - name: workspace-volume
+      mountPath: /home/jenkins/agent
+    # mount secret Docker Hub vào /kaniko/.docker/config.json ở đây
+
+  volumes:
+  - name: workspace-volume
+    emptyDir: {}
+"""
+        }
     }
 
     environment {
@@ -24,7 +56,6 @@ pipeline {
 
         stage('Build & Push Image (Kaniko)') {
             steps {
-                // Chạy lệnh Kaniko trong container 'kaniko'
                 container('kaniko') {
                     sh """
                         /kaniko/executor \
@@ -34,13 +65,6 @@ pipeline {
                           --cleanup
                     """
                 }
-            }
-        }
-
-        // Stage này chỉ để log, vì Kaniko đã push luôn image ở stage trên
-        stage('Push to Docker Hub') {
-            steps {
-                echo "Image đã được Kaniko build & push: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
             }
         }
 
