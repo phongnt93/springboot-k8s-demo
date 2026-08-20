@@ -1,7 +1,4 @@
-# Jenkinsfile
-
-```groovy
-@Library('jenkins-shared-library') _   
+@Library('jenkins-shared-library') _   // khai báo shared library
 
 pipeline {
     agent {
@@ -66,20 +63,23 @@ spec:
                     container('kaniko') {
                         // Tạo config.json cho Kaniko rồi build & push
                         sh '''
-                            # Tạo thư mục config cho Kaniko
+                            set -e
+
+                            echo "Preparing Docker Hub credentials for Kaniko..."
                             mkdir -p /kaniko/.docker
 
-                            # Tạo file /kaniko/.docker/config.json với auth Docker Hub
                             cat > /kaniko/.docker/config.json <<EOF
 {"auths":{"https://index.docker.io/v1/":{"auth":"$(printf "%s:%s" "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\\n')"}}}
 EOF
 
-                            # Build & push image bằng Kaniko
+                            echo "Building & pushing image with Kaniko..."
                             /kaniko/executor \
                               --dockerfile=$WORKSPACE/Dockerfile \
                               --context=$WORKSPACE \
                               --destination=$DOCKER_IMAGE_NAME:$IMAGE_TAG \
                               --cleanup
+
+                            echo "Kaniko build & push completed."
                         '''
                     }
                 }
@@ -88,6 +88,7 @@ EOF
 
         stage('Update K8s Manifest') {
             steps {
+                // Hàm từ jenkins-shared-library: sửa image tag trong manifest, commit & push
                 updateK8sManifest(
                     DOCKER_IMAGE_NAME,
                     IMAGE_TAG,
@@ -103,10 +104,8 @@ EOF
         stage('Prepare AI Log') {
             steps {
                 script {
-                    // Đơn giản hoá: ghi log tóm tắt các stage chính
-                    writeFile(
-                        file: 'jenkins.log',
-                        text: """
+                    // Ghi log tóm tắt các stage chính cho AI
+                    def logText = """
 [Pipeline] Project: springboot-k8s-demo
 
 [Checkout]
@@ -125,6 +124,10 @@ Status: ${currentBuild.result ?: 'SUCCESS'}
 
 If there was a failure, infer the most likely stage and root cause from this log.
 """
+
+                    writeFile(
+                        file: 'jenkins.log',
+                        text: logText
                     )
                 }
             }
@@ -151,7 +154,6 @@ Return ONLY ONE valid JSON object.
 Do NOT use markdown.
 
 Schema:
-
 {
   "status":"",
   "stage":"",
@@ -173,7 +175,7 @@ ${log}
                         file: "ai-request.json",
                         pretty: 4,
                         json: [
-                            preset: "fast-search",  // preset tương ứng fast agent[web:102]
+                            preset: "fast-search",
                             input : prompt
                         ]
                     )
@@ -238,7 +240,7 @@ cat ai-response.json
 
                     // Ghi mô tả build dựa trên AI
                     currentBuild.description = """
-❌ ${ai.severity}
+${ai.severity} – ${ai.status}
 
 ${ai.summary}
 
@@ -331,4 +333,3 @@ ai-summary.html
         }
     }
 }
-```
