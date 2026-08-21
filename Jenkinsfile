@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library')
+@Library('jenkins-shared-library') _
 
 pipeline {
     agent {
@@ -250,7 +250,7 @@ cat ai-response.json
 
                     def textBlock = message.content.find { it.type == "output_text" }
                     if (textBlock == null) {
-                        error("Cannot find output_text.")
+                        error("Cannot find output_text in response.")
                     }
 
                     echo "=========== AI JSON RAW ==========="
