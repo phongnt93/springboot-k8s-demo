@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library') _   // khai báo shared library
+@Library('jenkins-shared-library')
 
 pipeline {
     agent {
@@ -35,6 +35,7 @@ spec:
     }
 
     environment {
+        APP_NAME          = 'springboot-k8s-demo'                // ArgoCD Application
         DOCKER_IMAGE_NAME = 'nguyenphong8852/spring-boot-k8s-demo'
         IMAGE_TAG         = "${BUILD_NUMBER}"
         MANIFEST_FILE     = 'k8s-manifests/deployment.yaml'
@@ -52,7 +53,6 @@ spec:
 
         stage('Build & Push Image (Kaniko)') {
             steps {
-                // Lấy Docker Hub username/password từ Jenkins credentials
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'dockerhub-credentials',
@@ -61,7 +61,6 @@ spec:
                     )
                 ]) {
                     container('kaniko') {
-                        // Tạo config.json cho Kaniko rồi build & push
                         sh '''
                             set -e
 
@@ -88,7 +87,6 @@ EOF
 
         stage('Update K8s Manifest') {
             steps {
-                // Hàm từ jenkins-shared-library: sửa image tag trong manifest, commit & push
                 updateK8sManifest(
                     DOCKER_IMAGE_NAME,
                     IMAGE_TAG,
@@ -99,12 +97,41 @@ EOF
             }
         }
 
+        stage('Collect ArgoCD Status') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'argocd-credentials',
+                        usernameVariable: 'ARGO_USER',
+                        passwordVariable: 'ARGO_PASS'
+                    )
+                ]) {
+                    sh '''
+set -e
+
+echo "Logging into ArgoCD..."
+argocd login argocd-server.local \
+  --username "${ARGO_USER}" \
+  --password "${ARGO_PASS}" \
+  --grpc-web \
+  --insecure
+
+echo "===== argocd app get ${APP_NAME} =====" > argocd.log
+argocd app get ${APP_NAME} >> argocd.log || echo "argocd app get failed" >> argocd.log
+'''
+                }
+            }
+        }
+
         /********** AI STAGES **********/
 
         stage('Prepare AI Log') {
             steps {
                 script {
-                    // Ghi log tóm tắt các stage chính cho AI
+                    def argocdInfo = fileExists('argocd.log')
+                        ? readFile('argocd.log')
+                        : 'No ArgoCD log captured.'
+
                     def logText = """
 [Pipeline] Project: springboot-k8s-demo
 
@@ -121,6 +148,13 @@ Status: ${currentBuild.result ?: 'SUCCESS'}
 Manifest: ${MANIFEST_FILE}
 Git repo: https://github.com/phongnt93/springboot-k8s-demo.git
 Status: ${currentBuild.result ?: 'SUCCESS'}
+
+[ArgoCD]
+${argocdInfo}
+
+Notes:
+- ArgoCD Auto-Sync + Self-Heal are enabled.
+- PostSync Job 'springboot-smoke-test' runs a smoke test against https://springboot-app.local/actuator/health.
 
 If there was a failure, infer the most likely stage and root cause from this log.
 """
@@ -141,7 +175,7 @@ If there was a failure, infer the most likely stage and root cause from this log
                     def prompt = """
 You are an expert DevOps AI specializing in Jenkins, Docker, Kubernetes, Helm and ArgoCD.
 
-Analyze the Jenkins pipeline log and infer:
+Analyze the combined Jenkins + ArgoCD log and infer:
 - overall status
 - which stage is failing or risky
 - root cause
@@ -165,12 +199,11 @@ Schema:
   "severity":"LOW|MEDIUM|HIGH|CRITICAL"
 }
 
-Build Log:
+Log:
 
 ${log}
 """
 
-                    // Payload cho Perplexity Agent API
                     writeJSON(
                         file: "ai-request.json",
                         pretty: 4,
@@ -210,7 +243,6 @@ cat ai-response.json
                 script {
                     def resp = readJSON file: "ai-response.json"
 
-                    // Tìm message trong output (theo Agent API)
                     def message = resp.output.find { it.type == "message" }
                     if (message == null) {
                         error("Cannot find message object in response.")
@@ -224,7 +256,6 @@ cat ai-response.json
                     echo "=========== AI JSON RAW ==========="
                     echo textBlock.text
 
-                    // Parse JSON do AI trả về
                     def ai
                     try {
                         ai = readJSON text: textBlock.text
@@ -238,7 +269,6 @@ cat ai-response.json
                         json: ai
                     )
 
-                    // Ghi mô tả build dựa trên AI
                     currentBuild.description = """
 ${ai.severity} – ${ai.status}
 
@@ -247,7 +277,12 @@ ${ai.summary}
 Confidence: ${ai.confidence}
 """
 
-                    // Render HTML report
+                    if (ai.severity in ['HIGH', 'CRITICAL']) {
+                        currentBuild.result = 'FAILURE'
+                    } else if (ai.severity == 'MEDIUM') {
+                        currentBuild.result = 'UNSTABLE'
+                    }
+
                     def html = """
 <html>
 <head>
@@ -272,7 +307,7 @@ th{
 </head>
 <body>
 
-<h2>AI Analysis</h2>
+<h2>AI Analysis (Jenkins + ArgoCD)</h2>
 
 <table>
 <tr><th>Status</th><td>${ai.status}</td></tr>
@@ -318,6 +353,7 @@ ${ai.suggested_actions.collect { "<li>${it}</li>" }.join("\\n")}
         always {
             archiveArtifacts artifacts: '''
 jenkins.log,
+argocd.log,
 ai-request.json,
 ai-response.json,
 ai-summary.json,
@@ -326,10 +362,10 @@ ai-summary.html
         }
 
         success {
-            echo "CI/CD done (Kaniko): ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} pushed, manifest updated, AI analysis generated"
+            echo "CI/CD done (Kaniko): ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} pushed, manifest updated, ArgoCD status captured, AI analysis generated."
         }
         failure {
-            echo "Build failed – see AI Analysis report for details"
+            echo "Build failed – see AI Analysis and ArgoCD logs for details."
         }
     }
 }
