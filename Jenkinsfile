@@ -109,6 +109,19 @@ EOF
                     sh '''
 set -e
 
+# Download argocd CLI if not present
+if ! command -v argocd >/dev/null 2>&1; then
+  echo "argocd CLI not found, downloading..."
+  mkdir -p /tmp/argocd-bin
+  curl -sSL -o /tmp/argocd-bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+  chmod +x /tmp/argocd-bin/argocd
+  export PATH="/tmp/argocd-bin:$PATH"
+else
+  echo "argocd CLI already available."
+fi
+
+echo "Using argocd from: $(command -v argocd)"
+
 echo "Logging into ArgoCD..."
 argocd login argocd-server.local \
   --username "${ARGO_USER}" \
