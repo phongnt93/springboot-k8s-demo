@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: springboot-smoke-test
+  namespace: springboot-demo
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: smoke
+          image: curlimages/curl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting 10s before smoke test..."
+              sleep 10
+              echo "Checking https://springboot-app.local/actuator/health"
+              code=$(curl -s -o /dev/null -w "%{http_code}" https://springboot-app.local/actuator/health --insecure)
+              if [ "$code" = "200" ]; then
+                echo "Smoke test passed (HTTP 200)"
+                exit 0
+              else
+                echo "Smoke test FAILED, status: $code"
+                exit 1
+              fi
