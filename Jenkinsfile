@@ -123,7 +123,7 @@ fi
 echo "Using argocd from: $(command -v argocd)"
 
 echo "Logging into ArgoCD..."
-argocd login argocd-server.local \
+argocd login argocd-server.argocd.svc.cluster.local \
   --username "${ARGO_USER}" \
   --password "${ARGO_PASS}" \
   --grpc-web \
