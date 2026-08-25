@@ -107,30 +107,37 @@ EOF
                     )
                 ]) {
                     sh '''
-set -e
+# Không dùng set -e để lỗi argocd không làm fail stage
+set +e
+
+echo "===== Collecting ArgoCD status (best effort) =====" > argocd.log
 
 # Download argocd CLI if not present
 if ! command -v argocd >/dev/null 2>&1; then
-  echo "argocd CLI not found, downloading..."
+  echo "argocd CLI not found, downloading..." >> argocd.log
   mkdir -p /tmp/argocd-bin
   curl -sSL -o /tmp/argocd-bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
   chmod +x /tmp/argocd-bin/argocd
   export PATH="/tmp/argocd-bin:$PATH"
 else
-  echo "argocd CLI already available."
+  echo "argocd CLI already available at $(command -v argocd)" >> argocd.log
 fi
 
-echo "Using argocd from: $(command -v argocd)"
+echo "Using argocd from: $(command -v argocd)" >> argocd.log
 
-echo "Logging into ArgoCD..."
+echo "Logging into ArgoCD..." >> argocd.log
+# Server nội bộ không bật TLS, nên dùng --plaintext để tránh prompt 'Proceed (y/n)?'
 argocd login argocd-server.argocd.svc.cluster.local \
   --username "${ARGO_USER}" \
   --password "${ARGO_PASS}" \
-  --grpc-web \
-  --insecure
+  --plaintext >> argocd.log 2>&1
 
-echo "===== argocd app get ${APP_NAME} =====" > argocd.log
-argocd app get ${APP_NAME} >> argocd.log || echo "argocd app get failed" >> argocd.log
+echo "" >> argocd.log
+echo "===== argocd app get ${APP_NAME} =====" >> argocd.log
+argocd app get ${APP_NAME} >> argocd.log 2>&1
+
+# Dù login thành công hay thất bại cũng không làm fail stage
+exit 0
 '''
                 }
             }
